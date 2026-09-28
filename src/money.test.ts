@@ -119,3 +119,128 @@ test("formatKroner renders a decimal column identically to an øre one", () => {
   assert.equal(formatKroner(null), "–");
   assert.equal(formatKroner(180, "kr-exact"), `180,00${NB}kr`);
 });
+
+// ---------------------------------------------------------------------------
+// Edges. These pin what the code does today so a change to it is a deliberate
+// one. Where today's behaviour is the wrong thing for money, the pin is
+// followed by a skipped test that describes the safer behaviour — a v2
+// decision, not something to slip into a patch release.
+// ---------------------------------------------------------------------------
+
+test("formatOre: fractional øre are rounded silently (pinned, not endorsed)", () => {
+  // Intl rounds to the two decimals it is asked for. Half-øre round up…
+  assert.equal(formatOre(472550.5), `4${NB}725,51${NB}kr`);
+  assert.equal(formatOre(0.5), `0,01${NB}kr`);
+  // …and a fraction under half an øre still forces the two-decimal form,
+  // because the amount is not a whole krone even though it rounds to one.
+  assert.equal(formatOre(472500.4), `4${NB}725,00${NB}kr`);
+  assert.equal(formatOre(99.9, "bare"), "1,00");
+  assert.equal(formatOre(1.5, "dash"), "0,02");
+});
+
+test(
+  "formatOre: a fractional øre amount is not money and renders as empty",
+  { skip: "v2 decision — a fraction of an øre is a bug upstream, and rendering it hides the bug" },
+  () => {
+    assert.equal(formatOre(472550.5), "–");
+    assert.equal(formatOre(0.5, { empty: "?" }), "?");
+  },
+);
+
+test("kronerToOre: amounts beyond the safe-integer range lose precision silently (pinned)", () => {
+  // The last exactly representable øre amount.
+  assert.equal(kronerToOre(Number.MAX_SAFE_INTEGER / 100), Number.MAX_SAFE_INTEGER);
+  assert.ok(Number.isSafeInteger(kronerToOre(Number.MAX_SAFE_INTEGER / 100)));
+  // Past it, the result is a float that only looks like an integer.
+  const huge = kronerToOre(Number.MAX_SAFE_INTEGER);
+  assert.ok(Number.isFinite(huge));
+  assert.ok(!Number.isSafeInteger(huge));
+  assert.equal(kronerToOre(1e20), 1e22);
+  // Infinity, on the other hand, is already refused.
+  assert.ok(Number.isNaN(kronerToOre(Number.POSITIVE_INFINITY)));
+  assert.ok(Number.isNaN(kronerToOre(Number.NEGATIVE_INFINITY)));
+});
+
+test(
+  "kronerToOre: an amount that cannot be an exact øre count is NaN",
+  { skip: "v2 decision — 90 billion billion kroner is a data error, and a precise-looking wrong number is worse than NaN" },
+  () => {
+    assert.ok(Number.isNaN(kronerToOre(Number.MAX_SAFE_INTEGER)));
+    assert.ok(Number.isNaN(kronerToOre(1e20)));
+  },
+);
+
+test("parseOre: a lone comma is always the decimal mark, a lone period with three digits is grouping (pinned)", () => {
+  // The same digits, a factor of a thousand apart. Norwegian input never
+  // writes three decimals, so "4,725" is read as 4.725 kr and rounded.
+  assert.equal(parseOre("4,725"), 472);
+  assert.equal(parseOre("4.725"), 472500);
+  // With grouping resolved by the other mark there is no ambiguity.
+  assert.equal(parseOre("12.345.678"), 1234567800);
+  assert.equal(parseOre("12.34"), 1234);
+});
+
+test("parseOre: more than two decimals are rounded silently (pinned, not endorsed)", () => {
+  assert.equal(parseOre("1,999"), 200);
+  assert.equal(parseOre("1,9999"), 200);
+  assert.equal(parseOre("0,005"), 1);
+  // The parse goes through a float krone value before rounding, so the
+  // 1.005 caveat on kronerToOre applies here too.
+  assert.equal(parseOre("1,005"), 100);
+});
+
+test(
+  "parseOre: more than two decimals is not a price",
+  { skip: "v2 decision — nobody types tenths of an øre on purpose; rejecting it surfaces the typo instead of rounding it away" },
+  () => {
+    assert.ok(Number.isNaN(parseOre("1,999")));
+    assert.ok(Number.isNaN(parseOre("4,725")));
+    assert.ok(Number.isNaN(parseOre("0,005")));
+  },
+);
+
+test("parseOre: a leading plus is not accepted", () => {
+  assert.ok(Number.isNaN(parseOre("+250")));
+  assert.ok(Number.isNaN(parseOre("+ 250")));
+});
+
+test("parseOre: a negative amount with the dash suffix", () => {
+  assert.equal(parseOre("\u22124 725,\u2013"), -472500); // −4 725,–  (real minus, en dash)
+  assert.equal(parseOre("-4 725,-"), -472500);
+  assert.equal(parseOre(`${MINUS}4${NB}725,\u2014`), -472500); // em dash
+  assert.equal(parseOre(formatOre(-472500, "dash")), -472500);
+});
+
+test("parseOre: a bare leading or trailing decimal mark still parses", () => {
+  assert.equal(parseOre(".5"), 50);
+  assert.equal(parseOre(",5"), 50);
+  assert.equal(parseOre("5."), 500);
+  assert.equal(parseOre("5,"), 500);
+});
+
+test("oreToKroner: odd øre amounts come back as the expected decimal", () => {
+  assert.equal(oreToKroner(1), 0.01);
+  assert.equal(oreToKroner(3), 0.03);
+  assert.equal(oreToKroner(-1), -0.01);
+  assert.equal(oreToKroner(38951), 389.51);
+  assert.equal(oreToKroner(0), 0);
+  // Round-trips through kronerToOre for every odd amount, which is what an
+  // export-then-import must rely on.
+  for (const ore of [1, 3, 7, 99, 101, 12345, 38951, -38951]) {
+    assert.equal(kronerToOre(oreToKroner(ore)), ore);
+  }
+  // Garbage in, garbage out — it does not validate.
+  assert.ok(Number.isNaN(oreToKroner(Number.NaN)));
+  assert.equal(oreToKroner(0.5), 0.005);
+});
+
+test("formatKroner: NaN and the empty option", () => {
+  assert.equal(formatKroner(Number.NaN), "–");
+  assert.equal(formatKroner(Number.POSITIVE_INFINITY), "–");
+  assert.equal(formatKroner(Number.NaN, { empty: "Ikke satt" }), "Ikke satt");
+  assert.equal(formatKroner(null, { empty: "Ikke satt" }), "Ikke satt");
+  assert.equal(formatKroner(undefined, { empty: "" }), "");
+  // A style given as a string has no `empty`, so the default dash applies.
+  assert.equal(formatKroner(null, "dash"), "–");
+  assert.equal(formatKroner(Number.NaN, "kr-exact"), "–");
+});

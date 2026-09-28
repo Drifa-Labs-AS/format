@@ -123,13 +123,24 @@ New money is øre.
 
 ```bash
 npm run check     # typecheck, tests included
-npm test          # 26 tests, no test framework to install
+npm test          # 38 tests, no test framework to install
 npm run build     # emit dist/
 npm run verify    # all of the above, and fails if dist/ is stale
 ```
 
 `dist/` is committed, because a `github:` dependency installs what the repo
 contains. Run `npm run build` and commit the result before tagging a version.
+
+CI runs `npm run verify` on Node 24 for every push and pull request
+(`.github/workflows/verify.yml`), so a stale `dist/` or a red test cannot reach
+`main` unnoticed.
+
+Three tests are skipped on purpose. Each sits next to a test that pins a
+behaviour that is wrong for money — `formatOre` rounding a fractional øre,
+`parseOre` rounding `"1,999"` to two decimals, `kronerToOre` returning an
+imprecise number past `Number.MAX_SAFE_INTEGER` — and describes the safer
+behaviour instead. Making them pass changes the API, which is a v2 decision;
+until then the pin is what stops the change from happening by accident.
 
 Tests run on Node's own runner against the TypeScript sources directly — Node
 24 strips the types. The date suite pins its own time zone, so it does not pass
