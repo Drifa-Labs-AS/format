@@ -27,12 +27,13 @@ What this convention rules out is money in a float.
 ## Install
 
 ```bash
-npm install github:Drifa-Labs-AS/format#v1.0.0
+npm install github:Drifa-Labs-AS/format#v2.0.0
 ```
 
 No registry account, no token, no `.npmrc`. `npm ci` resolves it from the
 lockfile like any other dependency. Upgrading is a new tag and a lockfile
-change, which means it shows up in review.
+change, which means it shows up in review. What changed between versions is
+in [CHANGELOG.md](CHANGELOG.md).
 
 ## Money
 
@@ -53,10 +54,20 @@ parseOre("389,50")                    // 38950
 parseOre("4.725,-")                   // 472500
 parseOre("")                          // null   — blank field
 parseOre("abc")                       // NaN    — not a number
+parseOre("1,999")                     // NaN    — three decimals is not a price
+parseOre("4.725")                     // NaN    — 4 725 kr or 4,725 kr? refused
 ```
 
-`parseOre` returns `null` for an empty field and `NaN` for garbage so a form
-can tell "no price" from "you typed nonsense":
+`parseOre` returns `null` for an empty field and `NaN` for anything it cannot
+read as an exact øre count, so a form can tell "no price" from "you typed
+nonsense". It refuses rather than guesses: more than two decimals, a lone
+period with exactly three digits after it (grouping or decimal mark — the two
+readings are a factor of a thousand apart), and amounts too large to hold
+exactly are all `NaN`. The digits are read directly, never through a float.
+One consequence: `formatOre` output with `grouping: "period"` in the `kr` or
+`bare` style (`"126.000 kr"`) does not parse back for whole amounts of
+1 000–999 999 kr. Pre-fill an input with the default space grouping, which
+always round-trips.
 
 ```ts
 const ore = parseOre(input);
@@ -65,7 +76,10 @@ listing.priceOre = ore;               // number | null
 ```
 
 The space in the output is U+00A0, so a price never wraps across two lines.
-Negatives carry U+2212, the real minus sign.
+Negatives carry U+2212, the real minus sign. `formatOre` renders only a
+whole, safe-integer øre count; a fractional øre or an amount past
+`Number.MAX_SAFE_INTEGER` renders as the `empty` text, because that is an
+arithmetic bug upstream and a rounded number would hide it.
 
 ## Dates and numbers
 
@@ -123,7 +137,7 @@ New money is øre.
 
 ```bash
 npm run check     # typecheck, tests included
-npm test          # 38 tests, no test framework to install
+npm test          # 39 tests, no test framework to install
 npm run build     # emit dist/
 npm run verify    # all of the above, and fails if dist/ is stale
 ```
@@ -135,12 +149,10 @@ CI runs `npm run verify` on Node 24 for every push and pull request
 (`.github/workflows/verify.yml`), so a stale `dist/` or a red test cannot reach
 `main` unnoticed.
 
-Three tests are skipped on purpose. Each sits next to a test that pins a
-behaviour that is wrong for money — `formatOre` rounding a fractional øre,
-`parseOre` rounding `"1,999"` to two decimals, `kronerToOre` returning an
-imprecise number past `Number.MAX_SAFE_INTEGER` — and describes the safer
-behaviour instead. Making them pass changes the API, which is a v2 decision;
-until then the pin is what stops the change from happening by accident.
+A change to what `parseOre` accepts or `formatOre` renders is a major version:
+every product pins a tag, so nothing moves until each one chooses to. Bump
+`version` in `package.json`, add the entry to `CHANGELOG.md`, rebuild `dist/`,
+merge, then tag the merge commit (`git tag v2.0.0 && git push origin v2.0.0`).
 
 Tests run on Node's own runner against the TypeScript sources directly — Node
 24 strips the types. The date suite pins its own time zone, so it does not pass

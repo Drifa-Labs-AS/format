@@ -10,6 +10,11 @@
  * There is deliberately no second formatter that takes kroner. Two formatters
  * side by side, one taking kroner and one taking øre, are one factor of 100
  * apart — and picking the wrong one renders a 47-kroner price as 4 725.
+ *
+ * Since v2 the module refuses rather than guesses: an amount it cannot read
+ * as an exact øre count comes back as `NaN` from the parsers and as the
+ * `empty` text from the formatter, instead of a rounded or imprecise number
+ * that looks right. See CHANGELOG.md.
  */
 /**
  * A whole number of øre. This is a documentation alias, not a checked type —
@@ -25,9 +30,15 @@ export declare const ORE_PER_KRONE = 100;
  * For reading legacy decimal columns and for arithmetic that arrives in
  * kroner. Rounds to the nearest øre, half away from zero.
  *
+ * Returns `NaN` when the result cannot be an exact øre count: a non-finite
+ * input, or an amount past `Number.MAX_SAFE_INTEGER` øre (about 90 billion
+ * billion kroner), where a float only looks like an integer. That is a data
+ * error upstream, and a precise-looking wrong number is worse than `NaN`.
+ *
  * Note the usual binary-float caveat: 1.005 is not exactly representable, so
  * `kronerToOre(1.005)` is 100, not 101. Parse from the original string with
- * `parseOre` where you can — it does not go through a float krone value.
+ * `parseOre` where you can — it reads the digits directly and never holds the
+ * amount as a float krone value.
  */
 export declare function kronerToOre(kroner: number): Ore;
 /**
@@ -41,12 +52,33 @@ export declare function oreToKroner(ore: Ore): number;
  * Parse user input in kroner into whole øre.
  *
  * Accepts what a Norwegian actually types or pastes: `389`, `389,50`,
- * `389.50`, `4 725` (space or non-breaking space), `4.725` (period as the
- * thousands separator), `kr 389`, `389 kr`, `4 725,–`.
+ * `389.50`, `4 725` (space or non-breaking space), `4.725,50` (period as the
+ * thousands separator, comma as the decimal mark), `kr 389`, `389 kr`,
+ * `4 725,–`, `4.725,-`.
+ *
+ * It refuses rather than guesses. Three inputs an earlier version read as a
+ * number are `NaN` now:
+ *
+ * - **More than two decimals.** `1,999` is not a price; it is a typo, and
+ *   rounding it to 2,00 kr hides the typo.
+ * - **A lone period followed by exactly three digits.** `4.725` is either
+ *   4 725 kr (period as grouping) or 4,725 kr (period as the decimal mark),
+ *   and the two readings are a factor of a thousand apart. The same digits
+ *   are fine when something else settles it: `4.725,–` and `4.725,50` are
+ *   grouped, `4 725` and `4725` are whole kroner, `12.345.678` has two
+ *   periods so neither can be a decimal mark. This also means the output of
+ *   `formatOre` with `grouping: "period"` in the `kr` or `bare` style does
+ *   not round-trip for whole amounts of 1 000–999 999 kr (`"126.000 kr"`):
+ *   pre-fill an input with the default space grouping, which always does.
+ * - **An amount past `Number.MAX_SAFE_INTEGER` øre**, where the result would
+ *   only look exact.
+ *
+ * The digits are read directly, never through a float krone value, so
+ * `parseOre("1,005")` is refused rather than silently becoming 100 øre.
  *
  * Returns `null` for empty input (the field was left blank — usually "no
- * price", not an error) and `NaN` for input that is not a number at all, so
- * callers can tell the two apart:
+ * price", not an error) and `NaN` for input that is not a price, so callers
+ * can tell the two apart:
  *
  *     const ore = parseOre(input);
  *     if (Number.isNaN(ore)) return "Ugyldig pris";
@@ -93,6 +125,11 @@ export interface MoneyOptions {
  *     formatOre(472550)                      // "4 725,50 kr"
  *     formatOre(472500, { style: "dash" })   // "4 725,–"
  *     formatOre(null)                        // "–"
+ *
+ * Only a whole, safe-integer øre count is money. `null`, `undefined`, `NaN`,
+ * a fractional øre amount and an amount past `Number.MAX_SAFE_INTEGER` all
+ * render as `empty` — a fraction of an øre is a bug upstream, and printing
+ * it rounded would hide the bug.
  *
  * The space in the output is U+00A0, the non-breaking space `Intl` uses for
  * nb-NO. Negative amounts carry U+2212, the real minus sign, not a hyphen.
