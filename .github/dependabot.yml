@@ -1,0 +1,16 @@
+# Ground rule (workspace CLAUDE.md, Engineering baseline): every repo has Dependabot for each
+# ecosystem plus github-actions, monthly. This library deploys nothing; consumers pin a tag
+# (#vX.Y.Z), so an update here reaches no product until a new tag is cut and bumped there.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      dev-tools:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
